@@ -100,26 +100,45 @@ class BCDField(ByteField):
         return binascii.hexlify(struct.pack('b',(self.i2h(pkt, x))))
 
 
-class Data1bField(ByteField):
+class Data1bField(Field):
     '''
     SIGNED CHAR 
     resolution: 1
+    state: should be working fine
+
+    if ((x & 80h) == 80h) // y negat. y = - [dec(!x) + 1]
+    else y = dec(x)
     '''
     def __init__(self, name, default):
-        ByteField.__init__(self, name, default)
+        Field.__init__ (self, name, default, "b")
     def i2repr(self, pkt, x):
-        return "%f *C"%(float(self.i2h(pkt, x))-128)
+        return "%f *C"%(float(self.i2h(pkt, x)))
 
 
 class Data1cField(ByteField):
     '''
-    CHAR
+    CHAR / 2
     resolution: 0,5
+    state: should be working fine
+
+    y = dec(x) / 2
+    Max 100
     '''
     def __init__(self, name, default):
         ByteField.__init__(self, name, default)
     def i2repr(self, pkt, x):
-        return "%.1f *C"%(float(self.i2h(pkt, x))/2)
+        # FIXME: bigger than 100 should be implemented somewhere else. Perhaps in the i2h and h2i I think.
+        if self.i2h(pkt, x) > 100:
+            return 'none'
+        return "%.1f *C"%(self.i2h(pkt, x))
+    def i2m(self, pkt, x):
+        # internal 2 machine, extract after comma, place that in the low byte*256,
+        # before comma, as high byte
+        # FIXME double check if this is indeed correct
+        return x*2
+    def m2i(self, pkt, x):
+        # machine 2 internal
+        return (float(x)/2)
 
 
 class Data2bField(Field):
@@ -142,12 +161,13 @@ class Data2bField(Field):
     def __init__(self, name, default):
         Field.__init__(self, name, default, "2s")
     def h2i(self, pkt, x):
-        # TODO human to internal, remove "*C"
+        return x
+    def i2h(self, pkt, x):
         return x
     def i2m(self, pkt, x):
         # internal 2 machine, extract after comma, place that in the low byte*256,
         # before comma, as high byte
-        # FIXME
+        # FIXME double check if this is indeed correct
         x_int = math.floor(y)
         x_comma = (y - math.floor(y))*256
         return packLowByte(x_comma), packHighByte(x_int)
@@ -157,8 +177,7 @@ class Data2bField(Field):
     def any2i(self, pkt, x):
         return self.h2i(pkt,x)
     def i2repr(self, pkt, x):
-        # TODO human representation , add "*C"
-        return x
+        return "%.1f *C"%(self.i2h(pkt, x))
     def randval(self):
         # TODO 
         pass
@@ -168,6 +187,8 @@ class Data2cField(Field):
     '''
     SIGNED INT  = short 
     resolution: 1/16
+
+    state: todo
     '''
     def __init__(self, name, default):
         Field.__init__(self, name, default, "<H")
@@ -263,7 +284,7 @@ class EBusBulexOpDataBurnerControltoRoomControl0(Packet):
 
 class EBusBulexOpDataBurnerControltoRoomControl1(Packet):
     '''
-    state: work in progress
+    state: work in progress, needs to be tested with checked numbers
     '''
     fields_desc = [
                     Data1cField("VT", 0xff), # Lead Water temperature
@@ -285,7 +306,7 @@ class EBusBulexBroadcast(Packet):
     '''
     fields_desc = [
                     ByteEnumField("TB", None, { 0x00: 'Date/Time',
-                                                  0x01: 'Outside temperature'
+                                                0x01: 'Outside temperature'
                                             })
     ]
 
@@ -406,19 +427,34 @@ with open(filename, 'rb') as f:
 
 
 
-
-x = b'\x00\x80'
-x = b'\x00\x00'  # 0
-x = b'\x00\x01'  
-y= 0.00390625
-x = b'\xff\xff'  
-y= - 0.00390625
-x = b'\xff\x00'  
-y= -1
-x = b'\x80\x00'  
+# Test case for DATA1b
+x = b'\x00'
+y = 0
+x = b'\x01'
+y = 1
+x = b'\x7f'
+y = 127
+x = b'\x81'
+y = -127
+x = b'\x80'
 y = -128
-x = b'\x80\x01'  # -127,996
-x = b'\x7f\xff'  # 127,996
+
+y = float(struct.unpack('!b', x)[0])
+print y
+
+# Test case for DATA2b
+# x = b'\x00\x80'
+# x = b'\x00\x00'  # 0
+# x = b'\x00\x01'  
+# y= 0.00390625
+# x = b'\xff\xff'  
+# y= - 0.00390625
+# x = b'\xff\x00'  
+# y= -1
+# x = b'\x80\x00'  
+# y = -128
+# x = b'\x80\x01'  # -127,996
+# x = b'\x7f\xff'  # 127,996
 
 # y = ( unpackHighByte(x) + unpackLowByte(x) / 256 )
 
@@ -430,31 +466,4 @@ x = b'\x7f\xff'  # 127,996
 # print packHighByte(x_int)
 # print packLowByte(x_comma)
 
-
-
-# if x & b'\x80\x00' == b'\x80\x00':
-#     print True
-
-# e = EBusBulexOpDataBurnerControltoRoomControl1()
-# e.TA = 0x0000
-# print ("  TA 0x0000 = 0")
-# e.show()
-# e.TA = 0x0001
-# print ("  TA 0x0001 = 1/256 = 0,00390625")
-# e.show()
-# e.TA = 0xFFFF
-# print ("  TA 0xFFFF = -1/256 = -0,00390625")
-# e.show()
-# e.TA = 0xFF00
-# print ("  TA 0xFF00 = -1")
-# e.show()
-# e.TA = 0x8000
-# print ("  TA 0x8000 = -128,0")
-# e.show()
-# e.TA = 0x8001
-# print ("  TA 0x8001 = -127,996")
-# e.show()
-# e.TA = 0x7FFF
-# print ("  TA 0x7FFF = 127,996")
-# e.show()
 
