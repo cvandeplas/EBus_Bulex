@@ -106,7 +106,7 @@ class Data1bField(Field):
     resolution: 1
     state: should be working fine
 
-    if ((x & 80h) == 80h) // y negat. y = - [dec(!x) + 1]
+    if ((x & 80h) == 80h) //=> y negat. y = - [dec(!x) + 1]
     else y = dec(x)
     '''
     def __init__(self, name, default):
@@ -146,10 +146,13 @@ class Data2bField(Field):
     resolution: 1/256
     state: should be working fine
 
-    DATA2b contains in Low_Byte the post comma digits (in 1/256 ), 
-    the High_Byte corresponds with DATA1b.
-    High_Byte DATA2b : Signed, 
-    Low_Byte DATA2b : Unsigned
+    DATA2b contains in Low_Byte the post comma digits (in 1/256 ), the High_Byte corresponds with DATA1b.
+    High_Byte DATA2b : Signed, Low_Byte DATA2b : Unsigned 
+    Sample Calculation:
+        if ((x & 8000h) == 8000h) //=> y negative
+            y = - [dec(High_Byte(!x)) + (dec(Low_Byte(!x)) + 1) / 256]
+        else //=> y positive
+            y = dec(High_Byte (x)) + dec(Low_Byte (x)) / 256
     little endian
 
     internal: we store the value as float
@@ -189,6 +192,15 @@ class Data2cField(Field):
     resolution: 1/16
 
     state: todo
+
+    DATA2c contains in Low Nibble of Low Bytes the post comma digits (in 1/16).
+    Sample Calculation:
+        if ((x & 8000h) == 8000h) //=> y negative
+            y = - [dec(High_Byte(!x))⋅16 + dec(High_Nibble (Low_Byte (!x)))
+                + (dez(Low_Nibble (Low_Byte (!x))) +1 ) / 16]
+        else //=> y positive
+            y = dez(High_Byte(x))⋅16 + dez(High_ Nibble (Low Byte (x)))
+                + dez(Low_ Nibble (Low Byte (x))) / 16
     '''
     def __init__(self, name, default):
         Field.__init__(self, name, default, "<H")
