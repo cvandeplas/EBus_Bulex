@@ -80,11 +80,11 @@ def unpackLowByte(x):
     return float(struct.unpack('!B', x[0])[0])
 
 
-def packHighByte(x):
+def packSignedChar(x):
     # little endian, so high byte is on the right
     return struct.pack('!b', x)[0]
 
-def packLowByte(x):
+def packUnsignedChar(x):
     # little endian, so low byte is on the left
     return struct.pack('!B', x)[0]
 
@@ -144,7 +144,7 @@ class Data1cField(ByteField):
 class Data2bField(Field):
     '''
     resolution: 1/256
-    state: should be working fine
+    state: should be working fine, i2m TODO
 
     DATA2b contains in Low_Byte the post comma digits (in 1/256 ), the High_Byte corresponds with DATA1b.
     High_Byte DATA2b : Signed, Low_Byte DATA2b : Unsigned 
@@ -157,10 +157,6 @@ class Data2bField(Field):
 
     internal: we store the value as float
     '''
-    # def __init__(self, name, default):
-    #     Field.__init__(self, name, default, "<H")
-    # def i2repr(self, pkt, x):
-    #     return "%.8f *C"%((float(self.i2h(pkt, x))/256))
     def __init__(self, name, default):
         Field.__init__(self, name, default, "2s")
     def h2i(self, pkt, x):
@@ -172,11 +168,11 @@ class Data2bField(Field):
         # before comma, as high byte
         # FIXME double check if this is indeed correct
         x_int = math.floor(y)
-        x_comma = (y - math.floor(y))*256
-        return packLowByte(x_comma), packHighByte(x_int)
+        x_comma = ( y - math.floor(y) ) * 256
+        return packUnsignedChar(x_comma), packSignedChar(x_int) # FIXME this should be put in a double byte, not an array
     def m2i(self, pkt, x):
         # machine 2 internal
-        return ( unpackHighByte(x) + unpackLowByte(x) / 256 )
+        return ( unpackHighByte(x) + ( unpackLowByte(x) / 256 ) )
     def any2i(self, pkt, x):
         return self.h2i(pkt,x)
     def i2repr(self, pkt, x):
@@ -191,21 +187,51 @@ class Data2cField(Field):
     SIGNED INT  = short 
     resolution: 1/16
 
-    state: todo
+    state: should be working fine, i2m TODO
 
     DATA2c contains in Low Nibble of Low Bytes the post comma digits (in 1/16).
     Sample Calculation:
         if ((x & 8000h) == 8000h) //=> y negative
-            y = - [dec(High_Byte(!x))⋅16 + dec(High_Nibble (Low_Byte (!x)))
+            y = - [dec(High_Byte(!x)) * 16 + dec(High_Nibble (Low_Byte (!x)))
                 + (dez(Low_Nibble (Low_Byte (!x))) +1 ) / 16]
         else //=> y positive
-            y = dez(High_Byte(x))⋅16 + dez(High_ Nibble (Low Byte (x)))
+            y = dez(High_Byte(x)) * 16 + dez(High_ Nibble (Low Byte (x)))
                 + dez(Low_ Nibble (Low Byte (x))) / 16
+    little endian
+
+    internal: we store the value as float
     '''
     def __init__(self, name, default):
-        Field.__init__(self, name, default, "<H")
+        Field.__init__(self, name, default, "2s")
+    def h2i(self, pkt, x):
+        return x
+    def i2h(self, pkt, x):
+        return x
+    def i2m(self, pkt, x):
+        # internal 2 machine
+        # FIXME double check if this is indeed correct
+        x_int = math.floor(y)
+        x_lowNibble = ( y - x_int ) * 16
+        x_highByte = math.floor(x_int / 16)
+        x_highNibble = x_int - ( x_highByte * 16 )
+        x_lowByte = ( x_highNibble * 16 ) + x_lowNibble
+        return packUnsignedChar(x_lowByte), packSignedChar(x_highByte) # FIXME this should be put in a double byte, not an array
+    def m2i(self, pkt, x):
+        # machine 2 internal
+        intByte = struct.unpack('!B', x[0])[0]   # x[0] because little endian
+        highNibble = intByte >> 4
+        lowNibble = intByte - ( highNibble << 4 )
+        return ( unpackHighByte(x) * 16 ) + highNibble + ( float(lowNibble) / 16 )
+    def any2i(self, pkt, x):
+        return self.h2i(pkt,x)
     def i2repr(self, pkt, x):
-        return "%.1f *C"%((float(self.i2h(pkt, x))/16))
+        return "%.1f *C"%(self.i2h(pkt, x))
+    def randval(self):
+        # TODO 
+        pass
+
+
+
 
 
 
@@ -439,20 +465,25 @@ with open(filename, 'rb') as f:
 
 
 
-# Test case for DATA1b
-x = b'\x00'
-y = 0
-x = b'\x01'
-y = 1
-x = b'\x7f'
-y = 127
-x = b'\x81'
-y = -127
-x = b'\x80'
-y = -128
 
-y = float(struct.unpack('!b', x)[0])
-print y
+
+
+
+
+# Test case for DATA1b
+# x = b'\x00'
+# y = 0
+# x = b'\x01'
+# y = 1
+# x = b'\x7f'
+# y = 127
+# x = b'\x81'
+# y = -127
+# x = b'\x80'
+# y = -128
+
+# y = float(struct.unpack('!b', x)[0])
+# print y
 
 # Test case for DATA2b
 # x = b'\x00\x80'
@@ -470,12 +501,43 @@ print y
 
 # y = ( unpackHighByte(x) + unpackLowByte(x) / 256 )
 
-# x_int = math.floor(y)
-# x_comma = (y - math.floor(y))*256
-# print x_int
-# print x_comma
 
-# print packHighByte(x_int)
-# print packLowByte(x_comma)
+# # # Test case for DATA2c
+# x = b'\x00\x00'
+# y = 0
+# x = b'\x00\x01'
+# y = float(1)/16          # 0,0625
+# x = b'\xff\xff'
+# y = -float(1)/16       # -0,0625
+# x = b'\xff\xf0'
+# y = -1
+# x = b'\x80\x00'
+# y = -2048
+# x = b'\x80\x01'
+# y = -2047.9
+# x = b'\x7f\xff'
+# y = 2047.9375   # 0,9375
+
+
+# # intByte = struct.unpack('!B', x[0])[0]   # x[0] because little endian
+# # highNibble = intByte >> 4
+# # lowNibble = intByte - ( highNibble << 4 )
+# # y = ( unpackHighByte(x) * 16 ) + highNibble + ( float(lowNibble) / 16 )
+# # print (y)
+
+# x_int = math.floor(y)
+# x_lowNibble = ( y - x_int ) * 16
+# x_highByte = math.floor(x_int / 16)
+# x_highNibble = x_int - ( x_highByte * 16 )
+# x_lowByte = ( x_highNibble * 16 ) + x_lowNibble
+
+# x = packSignedChar(x_highByte), packUnsignedChar(x_lowByte)
+
+ 
+
+# scapy.utils.hexdump (packSignedChar(x_highByte))
+# scapy.utils.hexdump (packUnsignedChar(x_lowByte))
+
+
 
 
