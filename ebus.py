@@ -9,12 +9,15 @@ Created on Feb 4, 2015
 import binascii
 import struct
 import math
+import datetime
 
 from scapy.all import *
 from scapy.layers import *
 from scapy.layers.netbios import *
 from scapy.layers.smb import *
 from scapy.error import Scapy_Exception
+
+
 
 '''
 fgrep -E -v '\taa' data/test.txt  | awk -F'\t' '{ print $2 }' | sort | uniq -c  | sort -k 2 -n  > data/test.commands.txt
@@ -33,38 +36,9 @@ fgrep -E -v '\taa' data/test.txt  | awk -F'\t' '{ print $2 }'  | awk '{ print $3
    3 b5 13
   52 b5 16
 
-
 receiver calculates CRC, if OK, ack with 00
 CRC = X^8 + x^7 + x^4 + x^3 + x + 1  ???
 CRC = 0b110011011
-
-
-???
-                              ##
-10 08 b5 11 01 01 89 00 09 49 4e 00 80 ff ff 00 00 ff d7 00 aa aa   VT lead water temp = 0x49 = 73 C
-                                                                    NT return water = 0x4e = 78 C
-                                                                    TA_L = 0x00 = 0  ??
-                                                                    TA_H = 0x80 = 128 = 0,5  ??
-                                                                    WT = outgoing tap water? = 0xff 
-                                                                    ST = service water temp = 0xff 
-                                                                    vv = 0x00 = 0 heating  (1=service water)
-                                                                    xx = 0x00 (always 00)
-                                                                    xx = 0xFF (always FF)
-                                                                    CRC 
-10 08 b5 11 01 01 89 00 09 49 4d 00 80 ff ff 00 00 ff 36 00 aa aa 
-10 08 b5 11 01 01 89 00 09 48 4c 00 80 ff ff 00 00 ff 7d 00 aa aa 
-                              ##
-
-                CRC ACK NN ##                      CRC
-10 08 b5 11 01 00 88 00 08 76 02 0f 00 1f 10 00 80 ac 00 aa aa 
-10 08 b5 11 01 00 88 00 08 74 02 0f 00 1f 10 00 80 9b 00 aa aa 
-10 08 b5 11 01 00 88 00 08 50 02 0f 00 1f 10 00 80 b3 00 aa aa 
-10 08 b5 11 01 00 88 00 08 4e 02 0f 00 1f 10 00 80 15 00 aa aa 
-10 08 b5 11 01 00 88 00 08 4d 02 0f 00 1f 10 00 80 f4 00 aa aa 
-10 08 b5 11 01 00 88 00 08 4b 02 0f 00 1f 10 00 80 ad 00 aa aa 
-10 08 b5 11 01 00 88 00 08 49 02 0f 00 1f 10 00 80 9a 00 aa aa 
-10 08 b5 11 01 00 88 00 08 48 02 0f 00 1f 10 00 80 4c 00 aa aa 
-                           ##
 
 
 '''
@@ -97,7 +71,14 @@ class BCDField(ByteField):
     state: should be working fine
     '''
     def i2repr(self, pkt, x):
-        return binascii.hexlify(struct.pack('b',(self.i2h(pkt, x))))
+        return x
+
+    def i2m(self, pkt, x):
+        # internal 2 machine
+        return struct.unpack('b',binascii.unhexlify(x))[0]
+    def m2i(self, pkt, x):
+        # machine 2 internal
+        return binascii.hexlify(struct.pack('b',x))
 
 
 class Data1bField(Field):
@@ -295,15 +276,18 @@ class EBusBulexOpDataRoomControlBurnerControl(Packet):
                                             # 50 C
                     XByteField("xx3", 0xFF),# always 0xff
                     XByteField("xx4", 0xFF),# always 0xff
-                    XByteField("xx5", 0x00),# 0x00 or 0x01
+                    ByteEnumField("MD", None, {0x00: "On", 0x01: "Off"}),
+                                            # TODO GUESSWORK - must be on/off
+                                            # 0x00 = ON    LT = temperature
+                                            # 0x01 = OFF   LT = 0
                     XByteField("xx6", 0xFF),# always 0xff
                     XByteField("xx7", 0x00),# always 0x00
-                    XByteField("CRC", None), # CRC
+                    XByteField("CRC1", None), # CRC
 
                     XByteField("ACK", 0x00),
                     ByteField("NN2", 0x01), # Length of data, 1
                     ByteField("zz", 0x01), # acknowledge? always 1
-                    XByteField("CRC", None),
+                    XByteField("CRC2", None),
                     XByteField("ACK", 0x00)
     ]
 
@@ -581,6 +565,9 @@ bind_layers(EBusBulexOpDataBurnerControltoRoomControl, EBusBulexOpDataBurnerCont
 
 def EBusProcessStream(f):
     packet_list = []
+
+    curr_datetime = None # current virtual datetime as seen on the EBUS
+
     while True:
         byte = f.read(1)
         if not byte:  # end of file
@@ -591,8 +578,30 @@ def EBusProcessStream(f):
             if packet_list:
                 # Process packet
                 e = EBus(''.join(packet_list))
+                row = {}
+
+                # Set the date based on the EBUS packet
+                if e.haslayer(EBusBulexBroadcastDateTime): 
+                    curr_datetime = datetime.datetime(int("20"+e.yy), int(e.mm), int(e.dd), int(e.hh), int(e.min), int(e.ss))
+                    row = {'date':curr_datetime.isoformat(' ')}
+
+                if not curr_datetime:
+                    packet_list = []
+                    continue
+
+                # Outside Temperature                
                 if e.haslayer(EBusBulexBroadcastOutsideTemperature):
-                   
+                    row = {'date':curr_datetime.isoformat(' '), 'tempoutstreet':str(e.TA)}
+                    if upload_gdocs_enabled:
+                        upload_gdocs(row)
+
+                if e.haslayer(EBusBulexOpDataRoomControlBurnerControl):
+                    row = {'date':curr_datetime.isoformat(' '), 'boilertarget': str(e.ST), 'boilercurrent': str(e.LT), 'boileron': str(not e.MD)}
+                    if upload_gdocs_enabled:
+                        upload_gdocs(row)
+
+                if row:
+                    print (row)
                 # if not e.haslayer(EBusBulexBroadcast) and \
                 #    not e.haslayer(EBusBulexBroadcastDateTime) and \
                 #    not e.haslayer(EBusBulexBroadcastOutsideTemperature) and \
@@ -606,16 +615,17 @@ def EBusProcessStream(f):
                 #    not e.haslayer(EBusBulexUnknown12) and \
                 #    not e.haslayer(EBusBulexUnknown03) \
                 #    :
-
-                    e.show()
+                    
+                    # e.show()
                     # for the fun, print it on the screen
-                    print ("")
-                    print ("This packet: "), 
-                    for i in packet_list:
-                        print (binascii.hexlify(i)),
-                    print (" ")
-                    print ("")
-                    print ("")
+                    # print ("")
+                    # print ("This packet: "), 
+                    # for i in packet_list:
+                    #     print (binascii.hexlify(i)),
+                    # print (" ")
+                    # print ("")
+                    # print ("")
+
             packet_list = []
             continue  # jump to next byte read
 
@@ -626,9 +636,45 @@ def EBusProcessStream(f):
 
 
 
-# read out from a file
-filename = 'data/data.short.bin'
-filename = 'data/data.bin'
+def upload_gdocs(row):
+    '''
+    Upload the row to the gdocs sheet.
+    FIXME: refactor to have a background worker that does the API stuff, 
+    to prevent the main thread from locking because of web-problems
+    '''
+    try:
+        client.InsertRow(row, spreadsheet_key, worksheet_id)
+    except Exception as e:
+        print e
+
+
+
+upload_gdocs_enabled = False
+global client
+
+if upload_gdocs_enabled:
+    try:
+        import gdata.spreadsheet.service
+        email = ''
+        password = ''
+        spreadsheet_key = '' # key param
+        worksheet_id = 'od6' # default
+
+        client = gdata.spreadsheet.service.SpreadsheetsService()
+        #client.debug = True
+        client.email = email
+        client.password = password
+        client.source = 'EBUS client'
+        client.ProgrammaticLogin()
+    except: 
+        exit('ERROR: Missing gdata-python-client - https://github.com/google/gdata-python-client')
+
+
+# # read out from a file
+# filename = 'data/data.short.bin'
+# filename = 'data/data.bin'
+filename = sys.argv[1]
+print filename
 with open(filename, 'rb') as f:
     EBusProcessStream(f)
 
@@ -649,9 +695,6 @@ with open(filename, 'rb') as f:
 # for i in packet_list:
 #     print (binascii.hexlify(i)),
 # print ("")
-
-
-
 
 
 
