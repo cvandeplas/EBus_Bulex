@@ -595,11 +595,11 @@ def EBusProcessStream(f):
                     packet_list = []
                     continue
 
-                # if e.haslayer(EBusBulexBroadcastOutsideTemperature):
-                #     row = {'date':curr_datetime.isoformat(' '), 'tempoutstreet':str(e.TA)}
+                if e.haslayer(EBusBulexBroadcastOutsideTemperature):
+                    row = {'date':curr_datetime.isoformat(' '), 'tempoutstreet':str(e.TA)}
                     
-                # if e.haslayer(EBusBulexOpDataRoomControlBurnerControl):
-                #     row = {'date':curr_datetime.isoformat(' '), 'boilertarget': str(e.ST), 'boilerexittemp': str(e.LT), 'boileron': str(not e.MD)}
+                if e.haslayer(EBusBulexOpDataRoomControlBurnerControl):
+                    row = {'date':curr_datetime.isoformat(' '), 'boilertarget': str(e.ST), 'boilerexittemp': str(e.LT), 'boileron': str(not e.MD)}
 
                 if e.haslayer(EBusBulexOpDataBurnerControltoRoomControl1):
                     row = {'date':curr_datetime.isoformat(' '), 'heating': str(not e.vv), 'heatingexittemp': str(e.VT), 'heatingreturntemp': str(e.NT)} 
