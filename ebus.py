@@ -277,7 +277,7 @@ class EBusBulexOpDataRoomControlBurnerControl(Packet):
                     XByteField("xx3", 0xFF),# always 0xff
                     XByteField("xx4", 0xFF),# always 0xff
                     ByteEnumField("MD", None, {0x00: "On", 0x01: "Off"}),
-                                            # TODO GUESSWORK - must be on/off
+                                            # TODO GUESSWORK - must be on/off heating
                                             # 0x00 = ON    LT = temperature
                                             # 0x01 = OFF   LT = 0
                     XByteField("xx6", 0xFF),# always 0xff
@@ -358,6 +358,7 @@ class EBusBulexOpDataBurnerControltoRoomControl1(Packet):
                     XByteField("ACK", 0x00)
     ]
 
+
 class EBusBulexOpDataBurnerControltoRoomControl2(Packet):
     '''
     state: TODO unknown
@@ -371,6 +372,7 @@ class EBusBulexOpDataBurnerControltoRoomControl2(Packet):
                     XByteField("CRC", None),
                     XByteField("ACK", 0x00)
     ]
+
 
 class EBusBulexSetOpData(Packet):
     '''
@@ -402,6 +404,7 @@ class EBusBulexSetOpData(Packet):
                                                 0x3C: 'VR81RemoteControlUnitForVRC'
                                             })
     ]
+
 
 class EBusBulexGetOrSetDeviceConf(Packet):
     '''
@@ -485,6 +488,7 @@ class EBusBulexUnknown07(Packet):
                     XByteField("CRC2", None),
                     XByteField("ACK", 0x00)
     ]
+
 
 class EBusBulexUnknown12(Packet):
     '''
@@ -580,28 +584,36 @@ def EBusProcessStream(f):
                 e = EBus(''.join(packet_list))
                 row = {}
 
-                # Set the date based on the EBUS packet
+                # # Set the date based on the EBUS packet
                 if e.haslayer(EBusBulexBroadcastDateTime): 
                     curr_datetime = datetime.datetime(int("20"+e.yy), int(e.mm), int(e.dd), int(e.hh), int(e.min), int(e.ss))
-                    row = {'date':curr_datetime.isoformat(' ')}
+                    # row = {'date':curr_datetime.isoformat(' ')}
 
+                # Ignore everything until we have a valid timestamp on the bus. 
+                # It's a matter of waiting max 1 minute.
                 if not curr_datetime:
                     packet_list = []
                     continue
 
-                # Outside Temperature                
-                if e.haslayer(EBusBulexBroadcastOutsideTemperature):
-                    row = {'date':curr_datetime.isoformat(' '), 'tempoutstreet':str(e.TA)}
-                    if upload_gdocs_enabled:
-                        upload_gdocs(row)
+                # if e.haslayer(EBusBulexBroadcastOutsideTemperature):
+                #     row = {'date':curr_datetime.isoformat(' '), 'tempoutstreet':str(e.TA)}
+                    
+                # if e.haslayer(EBusBulexOpDataRoomControlBurnerControl):
+                #     row = {'date':curr_datetime.isoformat(' '), 'boilertarget': str(e.ST), 'boilerexittemp': str(e.LT), 'boileron': str(not e.MD)}
+
+                if e.haslayer(EBusBulexOpDataBurnerControltoRoomControl1):
+                    row = {'date':curr_datetime.isoformat(' '), 'heating': str(not e.vv), 'heatingexittemp': str(e.VT), 'heatingreturntemp': str(e.NT)} 
 
                 if e.haslayer(EBusBulexOpDataRoomControlBurnerControl):
-                    row = {'date':curr_datetime.isoformat(' '), 'boilertarget': str(e.ST), 'boilercurrent': str(e.LT), 'boileron': str(not e.MD)}
-                    if upload_gdocs_enabled:
-                        upload_gdocs(row)
+                    row = {'date':curr_datetime.isoformat(' '), 'requestheating': str(e.MD), 'requestheatingtemp': str(e.LT), 'requestboilertarget': str(e.ST)} 
 
                 if row:
                     print (row)
+                    if upload_gdocs_enabled:
+                        upload_gdocs(row)
+                    
+                if e.haslayer(EBusBulexOpDataRoomControlBurnerControl):
+
                 # if not e.haslayer(EBusBulexBroadcast) and \
                 #    not e.haslayer(EBusBulexBroadcastDateTime) and \
                 #    not e.haslayer(EBusBulexBroadcastOutsideTemperature) and \
@@ -613,11 +625,12 @@ def EBusProcessStream(f):
                 #    not e.haslayer(EBusBulexUnknown07) and \
                 #    not e.haslayer(EBusBulexOpDataRoomControlBurnerControl) and \
                 #    not e.haslayer(EBusBulexUnknown12) and \
-                #    not e.haslayer(EBusBulexUnknown03) \
+                #    not e.haslayer(EBusBulexUnknown03) and \
+                #    not e.haslayer(EBusIdentification) \
                 #    :
                     
                     # e.show()
-                    # for the fun, print it on the screen
+                    # # for the fun, print it on the screen
                     # print ("")
                     # print ("This packet: "), 
                     # for i in packet_list:
@@ -625,6 +638,7 @@ def EBusProcessStream(f):
                     # print (" ")
                     # print ("")
                     # print ("")
+                    pass
 
             packet_list = []
             continue  # jump to next byte read
