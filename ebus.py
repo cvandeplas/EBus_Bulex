@@ -9,7 +9,8 @@ Created on Feb 4, 2015
 import binascii
 import struct
 import math
-import datetime
+from datetime import datetime
+import json
 
 from scapy.all import *
 from scapy.layers import *
@@ -93,7 +94,7 @@ class Data1bField(Field):
     def __init__(self, name, default):
         Field.__init__ (self, name, default, "b")
     def i2repr(self, pkt, x):
-        return "%f *C"%(float(self.i2h(pkt, x)))
+        return "%f"%(float(self.i2h(pkt, x)))
 
 
 class Data1cField(ByteField):
@@ -111,7 +112,7 @@ class Data1cField(ByteField):
         # FIXME: bigger than 100 should be implemented somewhere else. Perhaps in the i2h and h2i I think.
         if self.i2h(pkt, x) > 100:
             return 'none'
-        return "%.1f *C"%(self.i2h(pkt, x))
+        return "%.1f"%(self.i2h(pkt, x))
     def i2m(self, pkt, x):
         # internal 2 machine, extract after comma, place that in the low byte*256,
         # before comma, as high byte
@@ -157,7 +158,7 @@ class Data2bField(Field):
     def any2i(self, pkt, x):
         return self.h2i(pkt,x)
     def i2repr(self, pkt, x):
-        return "%.1f *C"%(self.i2h(pkt, x))
+        return "%.1f"%(self.i2h(pkt, x))
     def randval(self):
         # TODO 
         pass
@@ -206,7 +207,7 @@ class Data2cField(Field):
     def any2i(self, pkt, x):
         return self.h2i(pkt,x)
     def i2repr(self, pkt, x):
-        return "%.1f *C"%(self.i2h(pkt, x))
+        return "%.1f"%(self.i2h(pkt, x))
     def randval(self):
         # TODO 
         pass
@@ -214,12 +215,56 @@ class Data2cField(Field):
 
 
 
+class EBusPacket(Packet):
+    def json(self, indent=3, lvl="", label_lvl=""):
+        """Prints a hierarchical view of the packet in json"""
+        ct = conf.color_theme
+        json_data = {'name': ct.layer_name(self.name)}
+        # print "%s%s %s %s" % (label_lvl,
+        #                       ct.punct("###["),
+        #                       ct.layer_name(self.name),
+        #                       ct.punct("]###"))
+        for f in self.fields_desc:
+            if isinstance(f, ConditionalField) and not f._evalcond(self):
+                continue
+            if isinstance(f, Emph) or f in conf.emph:
+                ncol = ct.emph_field_name
+                vcol = ct.emph_field_value
+            else:
+                ncol = ct.field_name
+                vcol = ct.field_value
+            fvalue = self.getfieldval(f.name)
+            if isinstance(fvalue, Packet) or (f.islist and f.holds_packets and type(fvalue) is list):
+                print "FIXME : %s  \\%-10s\\" % (label_lvl+lvl, ncol(f.name)) # FIXME 
+                fvalue_gen = SetGen(fvalue,_iterpacket=0)
+                for fvalue in fvalue_gen:
+                    fvalue.json(label_lvl=label_lvl+lvl+"   |")
+            else:
+                
+                begn = "%s  %-10s%s" % (label_lvl+lvl,
+                                        ncol(f.name),
+                                        ct.punct("="),)
+                reprval = f.i2repr(self,fvalue)
+                if type(reprval) is str:
+                    reprval = reprval.replace("\n", "\n"+" "*(len(label_lvl)
+                                                              +len(lvl)
+                                                              +len(f.name)
+                                                              +4))
+                # print "%s%s" % (begn,vcol(reprval))
+                json_data[ncol(f.name)] = f.i2repr(self,fvalue)
+        if isinstance(self.payload, scapy.packet.NoPayload):
+            pass
+        elif isinstance(self.payload, scapy.packet.Raw):
+            # FIXME print data payload in hex
+            print ("FIXME: raw")
+            pass
+        else:
+            json_data[ct.layer_name(self.payload.name)] = self.payload.json()
+
+        return json_data
 
 
-
-class EBus(Packet):
-    name = "eBUS"
-
+class EBus(EBusPacket):
     ebus_primary_commands = {
                             0x07: "0x07 - System Data Commands",
                             0xb5: "0xB5 - Bulex Commands"
@@ -260,7 +305,9 @@ class EBus(Packet):
                     
     ]
 
-class EBusBulexOpDataRoomControlBurnerControl(Packet):
+
+
+class EBusBulexOpDataRoomControlBurnerControl(EBusPacket):
     '''
     Seems to be related to the temperature of the boiler
 
@@ -292,7 +339,7 @@ class EBusBulexOpDataRoomControlBurnerControl(Packet):
     ]
 
 
-class EBusBulexOpDataBurnerControltoRoomControl(Packet):
+class EBusBulexOpDataBurnerControltoRoomControl(EBusPacket):
     '''
     state: work in progress
     '''
@@ -304,7 +351,7 @@ class EBusBulexOpDataBurnerControltoRoomControl(Packet):
     ]
 
 
-class EBusBulexOpDataBurnerControltoRoomControl0(Packet):
+class EBusBulexOpDataBurnerControltoRoomControl0(EBusPacket):
     '''
     state: TODO unknown
     '''
@@ -321,7 +368,10 @@ class EBusBulexOpDataBurnerControltoRoomControl0(Packet):
                                              # 331         xx3       = 0xd
                                              #  71         xx3       = 0xe
                                              # 286         xx3       = 0xf
-                    XByteField("xx4", None), # many values, probably temperature,
+                    Data1cField("xx4", None), # many values, probably temperature,
+                                             # Data1c gives the most logical output
+                                             # related to service water reported in EBusBulexOpDataBurnerControltoRoomControl1
+                                             # perhaps the difference in temperature needed? Numbers don't match
                                              # 0x00 up to 0x50 
                                              # mainly 0x1d t0 0x2d
                     XByteField("xx5", None), #  529         xx5       = 0x1f
@@ -341,32 +391,50 @@ class EBusBulexOpDataBurnerControltoRoomControl0(Packet):
     ]
 
 
-class EBusBulexOpDataBurnerControltoRoomControl1(Packet):
+class EBusBulexOpDataBurnerControltoRoomControl1(EBusPacket):
     '''
     state: work in progress, needs to be tested with checked numbers
     '''
 
-    vv_options = { 
-                    0: 'heating', 
-                    1: 'service water', 
-                    3: '3 - unknown', 
-                    4: '4 - unknown', # might be 'not heating, but circulating'
-                    }
     fields_desc = [
                     Data1cField("VT", 0xff), # Lead Water temperature
                     Data1cField("NT", 0xff), # Return water temperature
                     Data2bField("TA", 0x8000), # Outside temperature - always -128*C
                     Data1cField("WT", 0xff), # 0xff - Vaillant = Lead Water temperature to boiler ?
                     Data1cField("ST", 0xff), # 0xff - Vaillant = Boiler temperature ? 
-                    ByteEnumField("vv", None, vv_options),
+                    BitField("vv_8", 0x00, 1),
+                    BitField("vv_7", 0x00, 1),
+                    BitField("vv_6", 0x00, 1),
+                    BitField("vv_5", 0x00, 1),
+                    BitField("vv_4", 0x00, 1),
+                    BitField("vv_3", 0x00, 1), # TODO : Some hits here, identify what it is
+                    BitField("vv_2", 0x00, 1), # Vaillant: servicewater
+                    BitField("vv_heating", 0x00, 1),
                     XByteField("xx1", 0x00),
                     XByteField("xx2", 0xFF),
                     XByteField("CRC", None),
                     XByteField("ACK", 0x00)
     ]
 
+    
+        # return { 'heatingleadtemp': self.VT, 
+        #          'heatingreturntemp': self.NT,
+        #          # 'outsidetemp': self.TA,
+        #          # 'domesticleadtemp': self.WT,
+        #          # 'servicewatertemp': self.ST,
+        #          'vv_heating': self.vv_heating,
+        #          # 'vv_2' : self.vv_2,
+        #          'vv_3' : self.vv_3,
+        #          # 'vv_4' : self.vv_4,
+        #          # 'vv_5' : self.vv_5,
+        #          # 'vv_6' : self.vv_6,
+        #          # 'vv_7' : self.vv_7,
+        #          # 'vv_8' : self.vv_8,
+        # }
 
-class EBusBulexOpDataBurnerControltoRoomControl2(Packet):
+
+
+class EBusBulexOpDataBurnerControltoRoomControl2(EBusPacket):
     '''
     state: TODO unknown
     '''
@@ -381,7 +449,7 @@ class EBusBulexOpDataBurnerControltoRoomControl2(Packet):
     ]
 
 
-class EBusBulexSetOpData(Packet):
+class EBusBulexSetOpData(EBusPacket):
     '''
     state: TODO unknown
     '''
@@ -413,7 +481,7 @@ class EBusBulexSetOpData(Packet):
     ]
 
 
-class EBusBulexGetOrSetDeviceConf(Packet):
+class EBusBulexGetOrSetDeviceConf(EBusPacket):
     '''
     state: TODO unknown
     '''
@@ -424,7 +492,7 @@ class EBusBulexGetOrSetDeviceConf(Packet):
     ]
 
 
-class EBusBulexBroadcast(Packet):
+class EBusBulexBroadcast(EBusPacket):
     '''
     state: should be working fine
     '''
@@ -435,7 +503,7 @@ class EBusBulexBroadcast(Packet):
     ]
 
 
-class EBusBulexBroadcastOutsideTemperature(Packet):
+class EBusBulexBroadcastOutsideTemperature(EBusPacket):
     '''
     state: should be working fine
     '''
@@ -444,8 +512,11 @@ class EBusBulexBroadcastOutsideTemperature(Packet):
                     XByteField("CRC", None)
     ]
 
+    def json(self):
+        return {'outsidetemp':self.TA}
 
-class EBusBulexBroadcastDateTime(Packet):
+
+class EBusBulexBroadcastDateTime(EBusPacket):
     '''
     state: should be working fine
     '''
@@ -461,7 +532,7 @@ class EBusBulexBroadcastDateTime(Packet):
     ]
 
 
-class EBusBulexUnknown03(Packet):
+class EBusBulexUnknown03(EBusPacket):
     '''
     state: TODO unknown
 
@@ -478,26 +549,28 @@ class EBusBulexUnknown03(Packet):
     ]
 
 
-class EBusBulexUnknown07(Packet):
+class EBusBulexUnknown07(EBusPacket):
     '''
     state: TODO unknown
+    Boiler Target temperature
 
      325 This packet:  10 08 b5 07 01 08 0f 00 02 64 00 41 00  
      672 This packet:  30 15 b5 07 01 08 0b 00 02 fa 00 0d 00  
+
     '''
     fields_desc = [
                     XByteField("xx1", None), # 0x08
                     XByteField("CRC1", None),
                     XByteField("ACK", 0x00),
                     ByteField("NN", None), # length ?
-                    XByteField("xx3", None),
+                    Data1cField("ST", None),  # Boiler target
                     XByteField("xx4", None),
                     XByteField("CRC2", None),
                     XByteField("ACK", 0x00)
     ]
 
 
-class EBusBulexUnknown08(Packet):
+class EBusBulexUnknown08(EBusPacket):
     '''
     state: TODO unknown
 
@@ -508,8 +581,7 @@ class EBusBulexUnknown08(Packet):
     ]
 
 
-
-class EBusBulexUnknown12(Packet):
+class EBusBulexUnknown12(EBusPacket):
     '''
     state: TODO unknown
 
@@ -523,7 +595,7 @@ class EBusBulexUnknown12(Packet):
     ]
 
 
-class EBusBulexUnknown13(Packet):
+class EBusBulexUnknown13(EBusPacket):
     '''
     state: TODO unknown
 
@@ -535,8 +607,7 @@ class EBusBulexUnknown13(Packet):
     ]
 
 
-
-class EBusIdentification(Packet):
+class EBusIdentification(EBusPacket):
     '''
     state: TODO unknown
 
@@ -603,69 +674,56 @@ def EBusProcessStream(f):
             if packet_list:
                 # Process packet
                 e = EBus(''.join(packet_list))
-                row = {}
 
                 # # Set the date based on the EBUS packet
                 if e.haslayer(EBusBulexBroadcastDateTime): 
-                    curr_datetime = datetime.datetime(int("20"+e.yy), int(e.mm), int(e.dd), int(e.hh), int(e.min), int(e.ss))
-                    row = {'date':curr_datetime.isoformat(' ')}
-
+                    curr_datetime = datetime(int("20"+e.yy), int(e.mm), int(e.dd), int(e.hh), int(e.min), int(e.ss))
+                    # do not further process this packet
+                    packet_list = []
+                    continue
                 # Ignore everything until we have a valid timestamp on the bus. 
                 # It's a matter of waiting max 1 minute.
                 if not curr_datetime:
                     packet_list = []
                     continue
 
-                if e.haslayer(EBusBulexBroadcastOutsideTemperature):
-                    row = {'date':curr_datetime.isoformat(' '), 'tempoutstreet':str(e.TA)}
+                row = e.json()
+                row['date'] = curr_datetime.isoformat(' ')
+                if upload_elasticsearch_enabled:
+                    upload_elasticsearch(row, curr_datetime)
+                else:
+                    print json.dumps(row, sort_keys=True, indent=4, separators=(',', ': '))
                     
-                elif e.haslayer(EBusBulexOpDataRoomControlBurnerControl):
-                    row = {'date':curr_datetime.isoformat(' '), 
-                        'boilertarget': str(e.ST), 
-                        'heatingexittemp': str(e.LT), 
-                        'boileron': str(not e.MD)}
+                # if e.haslayer(EBusBulexOpDataBurnerControltoRoomControl1):
 
-                elif e.haslayer(EBusBulexOpDataBurnerControltoRoomControl1):
-                    row = {'date':curr_datetime.isoformat(' '), 
-                        'heating': str(EBusBulexOpDataBurnerControltoRoomControl1.vv_options.get(e.vv)), 
-                        'heatingexittemp': str(e.VT), 
-                        'heatingreturntemp': str(e.NT)} 
-
-
-                if row:
-                    print (row)
-                    if upload_gdocs_enabled:
-                        upload_gdocs(row)
+                # # if not e.haslayer(EBusBulexBroadcast) and \
+                # #    not e.haslayer(EBusBulexBroadcastDateTime) and \
+                # #    not e.haslayer(EBusBulexBroadcastOutsideTemperature) and \
+                # #    \
+                # #    not e.haslayer(EBusBulexOpDataBurnerControltoRoomControl0) and \
+                # #    not e.haslayer(EBusBulexOpDataBurnerControltoRoomControl1) and \
+                # #    not e.haslayer(EBusBulexOpDataBurnerControltoRoomControl2) and \
+                # #    not e.haslayer(EBusBulexSetOpData) and \
+                # #    not e.haslayer(EBusBulexGetOrSetDeviceConf) and \
+                # #    not e.haslayer(EBusBulexOpDataRoomControlBurnerControl) and \
+                # #    not e.haslayer(EBusBulexUnknown03) and \
+                # #    not e.haslayer(EBusBulexUnknown07) and \
+                # #    not e.haslayer(EBusBulexUnknown08) and \
+                # #    not e.haslayer(EBusBulexUnknown12) and \
+                # #    not e.haslayer(EBusBulexUnknown13) and \
+                # #    not e.haslayer(EBusIdentification) \
+                # #    :
                     
-                # if e.haslayer(EBusBulexUnknown08):
-
-                # if not e.haslayer(EBusBulexBroadcast) and \
-                #    not e.haslayer(EBusBulexBroadcastDateTime) and \
-                #    not e.haslayer(EBusBulexBroadcastOutsideTemperature) and \
-                #    not e.haslayer(EBusBulexOpDataBurnerControltoRoomControl2) and \
-                #    not e.haslayer(EBusBulexOpDataBurnerControltoRoomControl1) and \
-                #    not e.haslayer(EBusBulexOpDataBurnerControltoRoomControl0) and \
-                #    not e.haslayer(EBusBulexSetOpData) and \
-                #    not e.haslayer(EBusBulexGetOrSetDeviceConf) and \
-                #    not e.haslayer(EBusBulexOpDataRoomControlBurnerControl) and \
-                #    not e.haslayer(EBusBulexUnknown03) and \
-                #    not e.haslayer(EBusBulexUnknown07) and \
-                #    not e.haslayer(EBusBulexUnknown08) and \
-                #    not e.haslayer(EBusBulexUnknown12) and \
-                #    not e.haslayer(EBusBulexUnknown13) and \
-                #    not e.haslayer(EBusIdentification) \
-                #    :
-                    
-                    # e.show()
-                    # # for the fun, print it on the screen
-                    # print ("")
-                    # print ("This packet: "), 
-                    # for i in packet_list:
-                    #     print (binascii.hexlify(i)),
-                    # print (" ")
-                    # print ("")
-                    # print ("")
-                    # pass
+                #     e.show()
+                #     # for the fun, print it on the screen
+                #     print ("")
+                #     print ("This packet: "), 
+                #     for i in packet_list:
+                #         print (binascii.hexlify(i)),
+                #     print (" ")
+                #     print ("")
+                #     print ("")
+                #     pass
 
             packet_list = []
             continue  # jump to next byte read
@@ -673,49 +731,32 @@ def EBusProcessStream(f):
         # it's not a SYN, nor the end of the stream (also SYN)
         # so we should continue reading into our packet
         packet_list.append(byte)
+    
     pass
 
 
 
-def upload_gdocs(row):
-    '''
-    Upload the row to the gdocs sheet.
-    FIXME: refactor to have a background worker that does the API stuff, 
-    to prevent the main thread from locking because of web-problems
-    '''
-    try:
-        client.InsertRow(row, spreadsheet_key, worksheet_id)
-    except Exception as e:
-        print e
+
+def upload_elasticsearch(row, curr_datetime):
+    row['timestamp'] = curr_datetime
+    res = es.index(index='bulex', doc_type='packet', body=row )
+    # print (res['created']) # FIXME error handling
+    pass
 
 
+upload_elasticsearch_enabled = False
 
-upload_gdocs_enabled = False
-global client
+if upload_elasticsearch_enabled:
+    from elasticsearch import Elasticsearch
+    global es
+    es = Elasticsearch()
 
-if upload_gdocs_enabled:
-    try:
-        import gdata.spreadsheet.service
-        email = ''
-        password = ''
-        spreadsheet_key = '' # key param
-        worksheet_id = 'od6' # default
-
-        client = gdata.spreadsheet.service.SpreadsheetsService()
-        #client.debug = True
-        client.email = email
-        client.password = password
-        client.source = 'EBUS client'
-        client.ProgrammaticLogin()
-    except: 
-        exit('ERROR: Missing gdata-python-client - https://github.com/google/gdata-python-client')
 
 
 # # read out from a file
 # filename = 'data/data.short.bin'
 # filename = 'data/data.bin'
 filename = sys.argv[1]
-print filename
 with open(filename, 'rb') as f:
     EBusProcessStream(f)
 
