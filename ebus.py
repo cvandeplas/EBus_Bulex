@@ -310,17 +310,16 @@ class EBusBulexOpDataRoomControlBurnerControl(EBusPacket):
     fields_desc = [
                     XByteField("xx1", 0x00),# always 0x00
                     XByteField("xx2", 0x00),# always 0x00
-                    Data1cField("LT", None), # Lead water target temperature
+                    Data1cField("leadwatertargettemp", None), # Lead water target temperature
                                             # lots of 0 C
                                             # then from 50 to 77,5 C
-                    Data1cField("ST", None), # Service water target temperature
+                    Data1cField("servicewatertargettemp", None), # Service water target temperature
                                             # 50 C
                     XByteField("xx3", 0xFF),# always 0xff
                     XByteField("xx4", 0xFF),# always 0xff
-                    ByteEnumField("MD", None, {0x00: "On", 0x01: "Off"}),
-                                            # TODO GUESSWORK - must be on/off heating
-                                            # 0x00 = ON    LT = temperature
-                                            # 0x01 = OFF   LT = 0
+                    ByteField("MD", None),  # correlates with EBusBulexOpDataBurnerControltoRoomControl2.xx1_pump
+                                            # 0x00 = ON
+                                            # 0x01 = OFF
                     XByteField("xx6", 0xFF),# always 0xff
                     XByteField("xx7", 0x00),# always 0x00
                     XByteField("CRC1", None), # CRC
@@ -362,12 +361,8 @@ class EBusBulexOpDataBurnerControltoRoomControl0(EBusPacket):
                                              # 331         xx3       = 0xd
                                              #  71         xx3       = 0xe
                                              # 286         xx3       = 0xf
-                    Data1cField("xx4", None), # many values, probably temperature,
-                                             # Data1c gives the most logical output
-                                             # related to service water reported in EBusBulexOpDataBurnerControltoRoomControl1
-                                             # perhaps the difference in temperature needed? Numbers don't match
-                                             # 0x00 up to 0x50 
-                                             # mainly 0x1d t0 0x2d
+                    Data1cField("xx4", None),# might be related to the burner activity
+                                             # when this is increases, EBusBulexOpDataBurnerControltoRoomControl1.heatingleadtemp increases just afterwards
                     XByteField("xx5", None), #  529         xx5       = 0x1f
                                              #    3         xx5       = 0x2
                                              #    1         xx5       = 0x37
@@ -410,30 +405,15 @@ class EBusBulexOpDataBurnerControltoRoomControl1(EBusPacket):
                     XByteField("ACK", 0x00)
     ]
 
-    
-        # return { 'heatingleadtemp': self.VT, 
-        #          'heatingreturntemp': self.NT,
-        #          # 'outsidetemp': self.TA,
-        #          # 'domesticleadtemp': self.WT,
-        #          # 'servicewatertemp': self.ST,
-        #          'vv_heating': self.vv_heating,
-        #          # 'vv_2' : self.vv_2,
-        #          'vv_3' : self.vv_3,
-        #          # 'vv_4' : self.vv_4,
-        #          # 'vv_5' : self.vv_5,
-        #          # 'vv_6' : self.vv_6,
-        #          # 'vv_7' : self.vv_7,
-        #          # 'vv_8' : self.vv_8,
-        # }
-
-
 
 class EBusBulexOpDataBurnerControltoRoomControl2(EBusPacket):
     '''
     state: TODO unknown
     '''
     fields_desc = [
-                    XByteField("xx1", None), # 0x02, 0x03
+                    XByteField("xx1_pump", None), # might be the pump running
+                                             # 0x02, 0x03
+                                             # goes to 0x03 when 
                     XByteField("xx2", None), # always 0x14
                     XByteField("xx3", None), # always 0x96
                     XByteField("xx4", None), # always 0x5a
