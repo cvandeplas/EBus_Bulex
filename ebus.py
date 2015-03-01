@@ -111,7 +111,7 @@ class Data1cField(ByteField):
     def i2repr(self, pkt, x):
         # FIXME: bigger than 100 should be implemented somewhere else. Perhaps in the i2h and h2i I think.
         if self.i2h(pkt, x) > 100:
-            return 'none'
+            return None
         return "%.1f"%(self.i2h(pkt, x))
     def i2m(self, pkt, x):
         # internal 2 machine, extract after comma, place that in the low byte*256,
@@ -149,8 +149,8 @@ class Data2bField(Field):
         # internal 2 machine, extract after comma, place that in the low byte*256,
         # before comma, as high byte
         # FIXME double check if this is indeed correct
-        x_int = math.floor(y)
-        x_comma = ( y - math.floor(y) ) * 256
+        x_int = math.floor(x)
+        x_comma = ( x - math.floor(x) ) * 256
         return packUnsignedChar(x_comma), packSignedChar(x_int) # FIXME this should be put in a double byte, not an array
     def m2i(self, pkt, x):
         # machine 2 internal
@@ -220,10 +220,6 @@ class EBusPacket(Packet):
         """Prints a hierarchical view of the packet in json"""
         ct = conf.color_theme
         json_data = {'name': ct.layer_name(self.name)}
-        # print "%s%s %s %s" % (label_lvl,
-        #                       ct.punct("###["),
-        #                       ct.layer_name(self.name),
-        #                       ct.punct("]###"))
         for f in self.fields_desc:
             if isinstance(f, ConditionalField) and not f._evalcond(self):
                 continue
@@ -240,23 +236,21 @@ class EBusPacket(Packet):
                 for fvalue in fvalue_gen:
                     fvalue.json(label_lvl=label_lvl+lvl+"   |")
             else:
-                
-                begn = "%s  %-10s%s" % (label_lvl+lvl,
-                                        ncol(f.name),
-                                        ct.punct("="),)
                 reprval = f.i2repr(self,fvalue)
-                if type(reprval) is str:
-                    reprval = reprval.replace("\n", "\n"+" "*(len(label_lvl)
-                                                              +len(lvl)
-                                                              +len(f.name)
-                                                              +4))
-                # print "%s%s" % (begn,vcol(reprval))
-                json_data[ncol(f.name)] = f.i2repr(self,fvalue)
+                if reprval != None:
+                    try: 
+                        reprval = float(reprval)
+                    except:
+                        if "0x" in reprval and len(reprval) <= 4: 
+                            reprval = fvalue
+                        pass
+                json_data[ncol(f.name)] = reprval
         if isinstance(self.payload, scapy.packet.NoPayload):
             pass
         elif isinstance(self.payload, scapy.packet.Raw):
             # FIXME print data payload in hex
             print ("FIXME: raw")
+            print (self.show())
             pass
         else:
             json_data[ct.layer_name(self.payload.name)] = self.payload.json()
@@ -384,8 +378,8 @@ class EBusBulexOpDataBurnerControltoRoomControl0(EBusPacket):
                                              #    1         xx6       = 0x4
                                              #   42         xx6       = 0x8
                                              # 1309         xx6       = 0xf
-                    XByteField("xx7", None), # always 0x00, once 0x0f
-                    XByteField("xx8", None), # 0x00, 0x80, 0x81, 0x82
+                    ByteField("xx7", None), # always 0x00, once 0x0f
+                    ByteField("xx8", None), # 0x00, 0x80, 0x81, 0x82
                     XByteField("CRC", None),
                     XByteField("ACK", 0x00)
     ]
@@ -397,9 +391,9 @@ class EBusBulexOpDataBurnerControltoRoomControl1(EBusPacket):
     '''
 
     fields_desc = [
-                    Data1cField("VT", 0xff), # Lead Water temperature
-                    Data1cField("NT", 0xff), # Return water temperature
-                    Data2bField("TA", 0x8000), # Outside temperature - always -128*C
+                    Data1cField("heatingleadtemp", 0xff), # Lead Water temperature
+                    Data1cField("heatingreturntemp", 0xff), # Return water temperature
+                    Data2bField("heatingoutsidetemp", 0x8000), # Outside temperature - always -128*C
                     Data1cField("WT", 0xff), # 0xff - Vaillant = Lead Water temperature to boiler ?
                     Data1cField("ST", 0xff), # 0xff - Vaillant = Boiler temperature ? 
                     BitField("vv_8", 0x00, 1),
@@ -687,13 +681,14 @@ def EBusProcessStream(f):
                     packet_list = []
                     continue
 
-                row = e.json()
-                row['date'] = curr_datetime.isoformat(' ')
-                if upload_elasticsearch_enabled:
-                    upload_elasticsearch(row, curr_datetime)
-                else:
-                    print json.dumps(row, sort_keys=True, indent=4, separators=(',', ': '))
-                    
+                # if e.haslayer(EBusBulexOpDataBurnerControltoRoomControl1):
+                if True:
+                    row = e.json()
+                    row['date'] = curr_datetime.isoformat(' ')
+                    if upload_elasticsearch_enabled:
+                        upload_elasticsearch(row, curr_datetime)
+                    else:
+                        print json.dumps(row, sort_keys=True, indent=4, separators=(',', ': '))
                 # if e.haslayer(EBusBulexOpDataBurnerControltoRoomControl1):
 
                 # # if not e.haslayer(EBusBulexBroadcast) and \
@@ -741,10 +736,11 @@ def upload_elasticsearch(row, curr_datetime):
     row['timestamp'] = curr_datetime
     res = es.index(index='bulex', doc_type='packet', body=row )
     # print (res['created']) # FIXME error handling
+    # TODO elasticsearch in another thread
     pass
 
 
-upload_elasticsearch_enabled = False
+upload_elasticsearch_enabled = True
 
 if upload_elasticsearch_enabled:
     from elasticsearch import Elasticsearch
