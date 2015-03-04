@@ -21,6 +21,12 @@ from scapy.error import Scapy_Exception
 
 
 '''
+FIXME: as 0xaa = SYN, it can't be used in a packet.
+Convert a9 01 => aa 
+        a9 00 => a9
+
+FIXME: detect collisions based on the arbitration procedure
+
 fgrep -E -v '\taa' data/test.txt  | awk -F'\t' '{ print $2 }' | sort | uniq -c  | sort -k 2 -n  > data/test.commands.txt
 
 # Primary and secundary commands
