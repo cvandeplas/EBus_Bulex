@@ -1,4 +1,4 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python2.7
 
 '''
 Created on Feb 4, 2015
@@ -254,9 +254,7 @@ class EBusPacket(Packet):
         if isinstance(self.payload, scapy.packet.NoPayload):
             pass
         elif isinstance(self.payload, scapy.packet.Raw):
-            # FIXME print data payload in hex
-            print ("FIXME: raw")
-            print (self.show())
+            json_data["raw"] = binascii.hexlify(self.payload.load)
             pass
         else:
             json_data[ct.layer_name(self.payload.name)] = self.payload.json()
@@ -293,10 +291,18 @@ class EBus(EBusPacket):
                         
                         }
                  }
+    ebus_addresses = {
+                0x03: "Firing Automat 1 ?",
+                0x08: "Room Control - ?",
+                0x10: "Heater Controller 0 - Examaster ?",
+                0x15: "0x15 Examaster ? ", # was: boiler temp, heating temp
+                0x30: "Heater Controller 1 - Living Room",
+                0xfe: "Broadcast"
+    }
 
     fields_desc = [ 
-                    XByteField("QQ", None), # Source Address
-                    XByteField("ZZ", None), # Destination Address
+                    ByteEnumField("SRC", None, ebus_addresses), # Source Address
+                    ByteEnumField("DST", None, ebus_addresses), # Destination Address
                     ByteEnumField("PB", None, ebus_primary_commands), # Primary Command 
                     MultiEnumField("SB", None, ebus_secundary_commands, # Secundary Command
                                       depends_on=lambda x:x.PB,
@@ -357,6 +363,7 @@ class EBusBulexOpDataBurnerControltoRoomControl0(EBusPacket):
     fields_desc = [
                     XByteField("xx1", None), # many values, probably temperature
                                              # 0x00 up to 0xff 
+                                             # lowering step by step during the night
                     XByteField("xx2", None), # 447         xx2       = 0x1
                                              # 299         xx2       = 0x2
                                              # 947         xx2       = 0x3
@@ -428,7 +435,6 @@ class EBusBulexOpDataBurnerControltoRoomControl2(EBusPacket):
                     XByteField("ACK", 0x00)
     ]
 
-
 class EBusBulexSetOpData(EBusPacket):
     '''
     state: TODO unknown
@@ -460,7 +466,6 @@ class EBusBulexSetOpData(EBusPacket):
                                             })
     ]
 
-
 class EBusBulexGetOrSetDeviceConf(EBusPacket):
     '''
     state: TODO unknown
@@ -469,6 +474,87 @@ class EBusBulexGetOrSetDeviceConf(EBusPacket):
                     ByteEnumField("DB", None, { 0x0e: '0x0e unknown',
                                                 0x29: '0x29 unknown'
                                             })
+
+    ]
+
+class EBusBulexGetOrSetDeviceConf0e(EBusPacket):
+    '''
+    state: TODO unknown - configuring some settings (boiler, heating, ...)
+    '''
+    fields_desc = [
+                    ByteEnumField("command", None, { 0x03: 'Heating state ?',
+                                                     0x22: 'Heating temp - zone 1 ?',
+                                                     0x41: 'Boiler state ?',
+                                                     0x40: 'Boiler temp ?'} )
+
+    ]
+
+class EBusBulexGetOrSetDeviceConfBoilerState(EBusPacket):
+    '''
+    state: Partially known
+
+    Set the boiler state (on/off)
+    '''
+    fields_desc = [
+                    XByteField("xx1", None), # always 0x00
+                    ByteField("set_boiler_state", None), # 0 = off, 1 = on
+                    XByteField("CRC", None),
+                    XByteField("xx2", None), # always 0x00
+                    XByteField("xx3", None), # always 0x00
+                    XByteField("xx4", None), # always 0x00
+                    XByteField("xx5", None)  # always 0x00
+    ]
+
+class EBusBulexGetOrSetDeviceConfBoilerTemp(EBusPacket):
+    '''
+    state: Partially known
+
+    Set the boiler temperature
+    '''
+    fields_desc = [
+                    XByteField("xx1", None), # always 0x00
+                    Data2cField("set_boiler_temp", None), # requested boiler temp
+                    XByteField("CRC", None),
+                    XByteField("xx2", None), # always 0x00
+                    XByteField("xx3", None), # always 0x00
+                    XByteField("xx4", None), # always 0x00
+                    XByteField("xx5", None)  # always 0x00
+    ]
+
+class EBusBulexGetOrSetDeviceConfHeatingState(EBusPacket):
+    '''
+    state: Partially known
+
+    Heating off: 30 15 b5 09 04 0e 03 00 00 e8 00 00 00 00  
+    Heating on : 30 15 b5 09 04 0e 03 00 01 e9 00 00 00 00  
+ 
+    '''
+    fields_desc = [
+                    XByteField("xx1", None), # always 0x00
+                    ByteField("set_heating_state", None), # 0 = off, 1 = on
+                    XByteField("CRC", None),
+                    XByteField("xx2", None), # always 0x00
+                    XByteField("xx3", None), # always 0x00
+                    XByteField("xx4", None), # always 0x00
+                    XByteField("xx5", None)  # always 0x00
+    ]
+
+class EBusBulexGetOrSetDeviceConfHeatingTemp(EBusPacket):
+    '''
+    state: Partially known
+
+    Request zone 1 temp
+    '''
+    fields_desc = [
+                    XByteField("xx1", None), # always 0x00
+                    Data2cField("set_zone1_temp", None), # requested zone 1 temp
+                    XByteField("CRC", None),
+                    XByteField("xx2", None), # always 0x00
+                    XByteField("xx3", None), # always 0x00
+                    XByteField("xx4", None), # always 0x00
+                    XByteField("xx5", None)  # always 0x00
+
+
     ]
 
 
@@ -482,7 +568,6 @@ class EBusBulexBroadcast(EBusPacket):
                                             })
     ]
 
-
 class EBusBulexBroadcastOutsideTemperature(EBusPacket):
     '''
     state: should be working fine
@@ -494,7 +579,6 @@ class EBusBulexBroadcastOutsideTemperature(EBusPacket):
 
     def json(self):
         return {'outsidetemp':self.TA}
-
 
 class EBusBulexBroadcastDateTime(EBusPacket):
     '''
@@ -603,8 +687,8 @@ class EBusIdentification(EBusPacket):
                     XByteField("CRC", None),
                     XByteField("ACK", 0x00),
                     ByteField("NN", 0x00), # Length of data
-                    XByteField("HH", 0xb5), # 0xb5 = Vaillant / Bulex
-                    StrFixedLenField("gg", "", 5), # Device ID: "BAI00"
+                    ByteEnumField("vendor", 0xb5, { 0xb5: 'Vaillant/Bulex'}), # 0xb5 = Vaillant / Bulex
+                    StrFixedLenField("device_id", "", 5), # Device ID: "BAI00"
                     BCDField("vvs1", 0x00), #FIXME , this + next = SW version
                     BCDField("vvs2", 0x00), 
                     BCDField("vvh1", 0x00), #FIXME , this + next = HW version
@@ -628,6 +712,11 @@ bind_layers(EBus, EBusBulexSetOpData, PB=0xb5, SB=0x05)
 bind_layers(EBus, EBusBulexUnknown07, PB=0xb5, SB=0x07)
 bind_layers(EBus, EBusBulexUnknown08, PB=0xb5, SB=0x08)
 bind_layers(EBus, EBusBulexGetOrSetDeviceConf, PB=0xb5, SB=0x09)
+bind_layers(EBusBulexGetOrSetDeviceConf, EBusBulexGetOrSetDeviceConf0e, DB=0x0e)
+bind_layers(EBusBulexGetOrSetDeviceConf0e, EBusBulexGetOrSetDeviceConfHeatingState, command=0x03)
+bind_layers(EBusBulexGetOrSetDeviceConf0e, EBusBulexGetOrSetDeviceConfHeatingTemp, command=0x22)
+bind_layers(EBusBulexGetOrSetDeviceConf0e, EBusBulexGetOrSetDeviceConfBoilerTemp, command=0x40)
+bind_layers(EBusBulexGetOrSetDeviceConf0e, EBusBulexGetOrSetDeviceConfBoilerState, command=0x41)
 bind_layers(EBus, EBusBulexOpDataRoomControlBurnerControl, PB=0xb5, SB=0x10)
 bind_layers(EBus, EBusBulexOpDataBurnerControltoRoomControl, PB=0xb5, SB=0x11)
 bind_layers(EBus, EBusBulexUnknown12, PB=0xb5, SB=0x12)
@@ -661,20 +750,24 @@ def EBusProcessStream(f):
                     # do not further process this packet
                     packet_list = []
                     continue
-                # Ignore everything until we have a valid timestamp on the bus. 
-                # It's a matter of waiting max 1 minute.
-                if not curr_datetime:
-                    packet_list = []
-                    continue
 
-                # if e.haslayer(EBusBulexOpDataBurnerControltoRoomControl1):
+                # if e.haslayer(EBusBulexGetOrSetDeviceConfHeatingTemp):
                 if True:
                     row = e.json()
-                    row['date'] = curr_datetime.isoformat(' ')
                     if upload_elasticsearch_enabled:
+                        # Ignore everything until we have a valid timestamp on the bus. 
+                        # It's a matter of waiting max 1 minute.
+                        if not curr_datetime:
+                            packet_list = []
+                            continue
+                        row['date'] = curr_datetime.isoformat(' ')
                         upload_elasticsearch(row, curr_datetime)
                     else:
-                        print json.dumps(row, sort_keys=True, indent=4, separators=(',', ': '))
+                        print (json.dumps(row, sort_keys=True, indent=4, separators=(',', ': ')))
+                        print ("This packet was: "), 
+                        for i in packet_list:
+                            print (binascii.hexlify(i)),
+                        print (" ")
                 # if e.haslayer(EBusBulexOpDataBurnerControltoRoomControl1):
 
                 # # if not e.haslayer(EBusBulexBroadcast) and \
@@ -697,13 +790,7 @@ def EBusProcessStream(f):
                     
                 #     e.show()
                 #     # for the fun, print it on the screen
-                #     print ("")
-                #     print ("This packet: "), 
-                #     for i in packet_list:
-                #         print (binascii.hexlify(i)),
-                #     print (" ")
-                #     print ("")
-                #     print ("")
+                    
                 #     pass
 
             packet_list = []
@@ -726,7 +813,7 @@ def upload_elasticsearch(row, curr_datetime):
     pass
 
 
-upload_elasticsearch_enabled = True
+upload_elasticsearch_enabled = False
 
 if upload_elasticsearch_enabled:
     from elasticsearch import Elasticsearch
@@ -738,17 +825,18 @@ if upload_elasticsearch_enabled:
 # # read out from a file
 # filename = 'data/data.short.bin'
 # filename = 'data/data.bin'
-filename = sys.argv[1]
-with open(filename, 'rb') as f:
-    EBusProcessStream(f)
+# filename = sys.argv[1]
+# with open(filename, 'rb') as f:
+#     EBusProcessStream(f)
 
 
 # # read out from the serial bus
-# import serial
-# serial_dev='/dev/tty.usbmodem1411'
-# serial_baudrate=2400
-# with serial.Serial(serial_dev, serial_baudrate) as f:
-#     EBusProcessStream(f)
+import serial
+serial_dev='/dev/ttyACM0'
+serial_dev='/dev/tty.usbmodem1411'
+serial_baudrate=2400
+with serial.Serial(serial_dev, serial_baudrate) as f:
+    EBusProcessStream(f)
 
 
 # packet_list = b'\x10\x08\xb5\x11\x01\x01\x89\x00\x09\x7d\x72\x00\x80\xff\xff\x01\x00\xff\x39\x00'
