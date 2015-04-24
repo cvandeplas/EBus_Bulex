@@ -244,12 +244,13 @@ class EBusPacket(Packet):
             else:
                 reprval = f.i2repr(self,fvalue)
                 if reprval != None:
-                    try: 
-                        reprval = float(reprval)
-                    except:
-                        if "0x" in reprval and len(reprval) <= 4: 
-                            reprval = fvalue
-                        pass
+                    if not isinstance(f, ByteEnumField):  # we want to keep byteenumfield as string
+                        try: 
+                            reprval = float(reprval)
+                        except:
+                            if "0x" in reprval and len(reprval) <= 4: 
+                                reprval = fvalue
+                            pass
                 json_data[ncol(f.name)] = reprval
         if isinstance(self.payload, scapy.packet.NoPayload):
             pass
@@ -361,14 +362,15 @@ class EBusBulexOpDataBurnerControltoRoomControl0(EBusPacket):
     state: TODO unknown
     '''
     fields_desc = [
-                    XByteField("xx1", None), # many values, probably temperature
-                                             # 0x00 up to 0xff 
-                                             # lowering step by step during the night
-                    XByteField("xx2", None), # 447         xx2       = 0x1
-                                             # 299         xx2       = 0x2
-                                             # 947         xx2       = 0x3
-                                             # 320         xx2       = 0x4
-                    XByteField("xx3", None), #1009         xx3       = 0x10
+                    Data2cField("xx1", None),# Correlates very well with heatinglead/return temp
+                                             # however differs when xx5/xx7 is getting high
+                                             #                      xx8 is getting low
+                                             # this happens around 18:15  (wed)
+                                             #                     7:38- 7:42 (friday)
+
+
+                    XByteField("xx3", None), # TODO: this might be the room temp of zone 2
+                                             #1009         xx3       = 0x10
                                              #   1         xx3       = 0x4
                                              # 315         xx3       = 0xc
                                              # 331         xx3       = 0xd
@@ -376,13 +378,16 @@ class EBusBulexOpDataBurnerControltoRoomControl0(EBusPacket):
                                              # 286         xx3       = 0xf
                     Data1cField("xx4", None),# might be related to the burner activity
                                              # when this is increases, EBusBulexOpDataBurnerControltoRoomControl1.heatingleadtemp increases just afterwards
+                                             # Guessing ? requested heating water temperature? 
                     XByteField("xx5", None), #  529         xx5       = 0x1f
                                              #    3         xx5       = 0x2
                                              #    1         xx5       = 0x37
                                              # 1309         xx5       = 0x4
                                              #   39         xx5       = 0x7
                                              #  132         xx5       = 0x8
-                    XByteField("xx6", None), #  661         xx6       = 0x10
+                    XByteField("xx6", None), # huge jump before leadtemp raises
+                                             # might be burner activity
+                                             #  661         xx6       = 0x10
                                              #    1         xx6       = 0x4
                                              #   42         xx6       = 0x8
                                              # 1309         xx6       = 0xf
@@ -751,7 +756,7 @@ def EBusProcessStream(f):
                     packet_list = []
                     continue
 
-                # if e.haslayer(EBusBulexGetOrSetDeviceConfHeatingTemp):
+                #if e.haslayer(EBusBulexGetOrSetDeviceConf0e):
                 if True:
                     row = e.json()
                     if upload_elasticsearch_enabled:
@@ -813,7 +818,7 @@ def upload_elasticsearch(row, curr_datetime):
     pass
 
 
-upload_elasticsearch_enabled = False
+upload_elasticsearch_enabled = True
 
 if upload_elasticsearch_enabled:
     from elasticsearch import Elasticsearch
@@ -825,18 +830,18 @@ if upload_elasticsearch_enabled:
 # # read out from a file
 # filename = 'data/data.short.bin'
 # filename = 'data/data.bin'
-# filename = sys.argv[1]
-# with open(filename, 'rb') as f:
-#     EBusProcessStream(f)
+filename = sys.argv[1]
+with open(filename, 'rb') as f:
+    EBusProcessStream(f)
 
 
 # # read out from the serial bus
-import serial
-serial_dev='/dev/ttyACM0'
-serial_dev='/dev/tty.usbmodem1411'
-serial_baudrate=2400
-with serial.Serial(serial_dev, serial_baudrate) as f:
-    EBusProcessStream(f)
+# import serial
+# serial_dev='/dev/ttyACM0'
+# serial_dev='/dev/tty.usbmodem1411'
+# serial_baudrate=2400
+# with serial.Serial(serial_dev, serial_baudrate) as f:
+#     EBusProcessStream(f)
 
 
 # packet_list = b'\x10\x08\xb5\x11\x01\x01\x89\x00\x09\x7d\x72\x00\x80\xff\xff\x01\x00\xff\x39\x00'
